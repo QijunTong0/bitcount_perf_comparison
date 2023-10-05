@@ -1,5 +1,4 @@
 import numpy as np
-import cupy as cp
 import time
 
 m1 = 0x5555555555555555
@@ -10,7 +9,7 @@ m16 = 0x0000FFFF0000FFFF
 m32 = 0x00000000FFFFFFFF
 h01 = 0x0101010101010101
 
-f = np.vectorize(lambda x: bin(n).count("1"))
+f = np.vectorize(lambda x: x.bit_count())
 
 precalc_16bit = np.array(
     [bin(n).count("1") for n in range(2**16 - 1)], dtype=np.uint8
@@ -48,15 +47,14 @@ arr_sp = (np.minimum(np.arange(n * 4), 2**16 - 2)).reshape(n, 4).astype(np.uint1
 
 st = time.time()
 for _ in range(1000):
+    py_builtin_bitcount(arr)
+print("vectorize:", 1000 * (time.time() - st), "ns")
+
+st = time.time()
+for _ in range(1000):
     unpack_arr.sum(axis=1)
 print("unpack:", 1000 * (time.time() - st), "ns")
 
-"""
-st = time.time()
-for _ in range(1000):
-    py_builtin_bitcount(arr)
-print("vectorize:", time.time() - st, "ms")
-"""
 
 st = time.time()
 for _ in range(1000):
@@ -72,46 +70,49 @@ print("precalc:", 1000 * (time.time() - st), "ns")
 # res = timeit.timeit("np.bitwise_count(arr)", globals=globals(), number=100)
 # print("buildin:", res * 10, "ms")
 
+try:
+    import cupy as cp
 
-x = cp.asarray(arr)
-x_unpack = cp.asarray(unpack_arr)
+    x = cp.asarray(arr)
+    x_unpack = cp.asarray(unpack_arr)
 
+    def cp_algo_bitcount(arr: cp.ndarray):
+        arr -= (arr >> 1) & m1
+        arr = (arr & m2) + ((arr >> 2) & m2)
+        arr = (arr + (arr >> 4)) & m4
+        return (arr * h01) >> 56
 
-def cp_algo_bitcount(arr: cp.ndarray):
-    arr -= (arr >> 1) & m1
-    arr = (arr & m2) + ((arr >> 2) & m2)
-    arr = (arr + (arr >> 4)) & m4
-    return (arr * h01) >> 56
+    st = time.time()
+    for _ in range(1000):
+        x_unpack.sum(axis=1)
+        cp.cuda.Stream.null.synchronize()
+    print("gpu_unpack:", 1000 * (time.time() - st), "ns")
 
+    st = time.time()
+    for _ in range(1000):
+        cp_algo_bitcount(x)
+        cp.cuda.Stream.null.synchronize()
+    print("gpu_algo:", 1000 * (time.time() - st), "ns")
 
-st = time.time()
-for _ in range(1000):
-    x_unpack.sum(axis=1)
-    cp.cuda.Stream.null.synchronize()
-print("gpu_unpack:", 1000 * (time.time() - st), "ns")
+    cp_kernel_fusion_bitcount = cp.ElementwiseKernel(
+        "uint64 x",
+        "uint64 z",
+        """
+        z -= (x >> 1) & 0x5555555555555555;
+        z = (z & 0x3333333333333333) + ((z >> 2) & 0x3333333333333333);
+        z = (z + (z >> 4)) & 0x0F0F0F0F0F0F0F0F;
+        z = (z * 0x0101010101010101) >> 56
+    """,
+        "pros_64bit",
+    )
+    st = time.time()
+    for _ in range(1000):
+        cp_kernel_fusion_bitcount(x)
+        cp.cuda.Stream.null.synchronize()
+    print("gpu_kernel_fusion_algo:", 1000 * (time.time() - st), "ns")
 
-st = time.time()
-for _ in range(1000):
-    cp_algo_bitcount(x)
-    cp.cuda.Stream.null.synchronize()
-print("gpu_algo:", 1000 * (time.time() - st), "ns")
-
-cp_kernel_fusion_bitcount = cp.ElementwiseKernel(
-    "uint64 x",
-    "uint64 z",
-    """
-    z -= (x >> 1) & 0x5555555555555555;
-    z = (z & 0x3333333333333333) + ((z >> 2) & 0x3333333333333333);
-    z = (z + (z >> 4)) & 0x0F0F0F0F0F0F0F0F;
-    z = (z * 0x0101010101010101) >> 56
-   """,
-    "pros_64bit",
-)
-st = time.time()
-for _ in range(1000):
-    cp_kernel_fusion_bitcount(x)
-    cp.cuda.Stream.null.synchronize()
-print("gpu_kernel_fusion_algo:", 1000 * (time.time() - st), "ns")
+except:
+    print("no_cupy_env")
 
 
 """
