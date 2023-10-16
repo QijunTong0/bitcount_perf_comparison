@@ -45,26 +45,27 @@ unpack_arr = (np.arange(n * 64) % 2).reshape(n, 64).astype(np.bool_)
 arr = np.arange(n, dtype=np.uint64)
 arr_sp = (np.minimum(np.arange(n * 4), 2**16 - 2)).reshape(n, 4).astype(np.uint16)
 
+"""
 st = time.time()
 for _ in range(1000):
     py_builtin_bitcount(arr)
-print("vectorize:", 1000 * (time.time() - st), "ns")
-
+print("vectorize:", 1000 * (time.time() - st), "us")
+"""
 st = time.time()
 for _ in range(1000):
     unpack_arr.sum(axis=1)
-print("unpack:", 1000 * (time.time() - st), "ns")
+print("unpack:", 1000 * (time.time() - st), "us")
 
 
 st = time.time()
 for _ in range(1000):
     algo_bitcount(arr)
-print("algo:", 1000 * (time.time() - st), "ns")
+print("algo:", 1000 * (time.time() - st), "us")
 
 st = time.time()
 for _ in range(1000):
     precalc_bitcount_16bit(arr_sp).sum(axis=1)
-print("precalc:", 1000 * (time.time() - st), "ns")
+print("precalc:", 1000 * (time.time() - st), "us")
 
 
 # res = timeit.timeit("np.bitwise_count(arr)", globals=globals(), number=100)
@@ -101,9 +102,11 @@ try:
         z -= (x >> 1) & 0x5555555555555555;
         z = (z & 0x3333333333333333) + ((z >> 2) & 0x3333333333333333);
         z = (z + (z >> 4)) & 0x0F0F0F0F0F0F0F0F;
-        z = (z * 0x0101010101010101) >> 56
+        z += z >> 8;
+        z += z >> 16;
+        z += z >> 32;
     """,
-        "pros_64bit",
+        "bitcount_kernel",
     )
     st = time.time()
     for _ in range(1000):
